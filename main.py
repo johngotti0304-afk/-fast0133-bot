@@ -1,8 +1,22 @@
-import os, asyncio, requests, time
+import os, asyncio, requests, time, threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Bot
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
+PORT = int(os.environ.get("PORT", 10000))
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"FAST0133 Bot is LIVE")
+
+def run_server():
+    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    server.serve_forever()
+
+threading.Thread(target=run_server, daemon=True).start()
 
 bot = Bot(token=BOT_TOKEN)
 seen = set()
@@ -25,7 +39,7 @@ def rugcheck(mint):
         return 100
 
 async def main():
-    await bot.send_message(chat_id=CHANNEL_ID, text="FAST0133 Scanner LIVE!")
+    await bot.send_message(chat_id=CHANNEL_ID, text="FAST0133 Scanner LIVE! (met webserver)")
     print("Scanner gestart")
     while True:
         tokens = get_new_tokens()

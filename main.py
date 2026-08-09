@@ -18,27 +18,40 @@ def get_new_tokens():
 
 def rugcheck(mint):
     try:
-        r = requests.get(f"https://api.rugcheck.xyz/v1/tokens/{mint}/report", timeout=10).json()
+        url = f"https://api.rugcheck.xyz/v1/tokens/{mint}/report"
+        r = requests.get(url, timeout=10).json()
         return r.get("score", 100)
     except:
         return 100
 
 async def main():
-    await bot.send_message(chat_id=CHANNEL_ID, text="🚀 FAST0133 Scanner LIVE!\nFilter: <3min oud | MC > $2K | RugCheck < 35")
+    await bot.send_message(chat_id=CHANNEL_ID, text="FAST0133 Scanner LIVE!")
     print("Scanner gestart")
     while True:
         tokens = get_new_tokens()
         for t in tokens:
             mint = t.get("mint")
-            if not mint or mint in seen: continue
+            if not mint or mint in seen:
+                continue
             seen.add(mint)
             name = t.get("name","?")
             symbol = t.get("symbol","?")
             mc = t.get("usd_market_cap",0)
             created = t.get("created_timestamp",0)
             age_min = (time.time()*1000 - created)/1000/60
-            if age_min > 3: continue
-            if mc < 2000: continue
+            if age_min > 3:
+                continue
+            if mc < 2000:
+                continue
             risk = rugcheck(mint)
-            if risk > 35: continue
-            msg = f"🚨 NEW: {name} (${symbol})\n💰 MC: ${mc:,.0f} | Age: {age_min:.1f}m\n🛡️ Risk: {risk}/100\n\nCA: `{mint}`\n[Chart](https://pump.fun/coin/{mint}) | [RugCheck](https://rugcheck.xyz/tokens/{mint})\n\n
+            if risk > 35:
+                continue
+            text = f"NEW: {name} ({symbol})\nMC: {mc:.0f} Age: {age_min:.1f}m Risk: {risk}\nCA: {mint}\nhttps://pump.fun/coin/{mint}\nhttps://rugcheck.xyz/tokens/{mint}\n@fast0133"
+            try:
+                await bot.send_message(chat_id=CHANNEL_ID, text=text)
+                print(f"Posted {symbol}")
+            except Exception as e:
+                print(e)
+        await asyncio.sleep(12)
+
+asyncio.run(main())

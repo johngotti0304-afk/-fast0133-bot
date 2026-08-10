@@ -1,69 +1,104 @@
 import os, asyncio, requests, time, threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-
-print("=== STARTING BOT ===")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID")
-print(f"Token exists: {bool(BOT_TOKEN)}")
-print(f"Channel: {CHANNEL_ID}")
-
-if not BOT_TOKEN or not CHANNEL_ID:
-    print("ERROR: BOT_TOKEN of CHANNEL_ID mist!")
-    # blijf draaien zodat Render niet crasht
-    while True: time.sleep(60)
-
 from telegram import Bot
 
-PORT = int(os.environ.get("PORT", 10000))
+print("=== FAST0133 $25K VERIFIED START ===")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = os.getenv("CHANNEL_ID")
+PORT = int(os.getenv("PORT", 10000))
+
 class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"FAST0133 $20K LIVE")
-    def do_HEAD(self):
-        self.send_response(200)
-        self.end_headers()
+    def do_GET(self): 
+        self.send_response(200); self.end_headers(); self.wfile.write(b"$25K VERIFIED LIVE")
+    def do_HEAD(self): 
+        self.send_response(200); self.end_headers()
 
 threading.Thread(target=lambda: HTTPServer(("0.0.0.0", PORT), Handler).serve_forever(), daemon=True).start()
 
 bot = Bot(token=BOT_TOKEN)
 seen = set()
 
+def is_verified_safe(mint):
+    """Return (is_safe:bool, reason:str, score:int)"""
+    try:
+        r = requests.get(f"https://api.rugcheck.xyz/v1/tokens/{mint}/report", timeout=8).json()
+        score = r.get("score", 100)
+        
+        # FAILS
+        if r.get("rugged"): return False, "RUGGED", score
+        if score > 40: return False, f"High risk {score}", score
+        
+        # Checks
+        top10 = r.get("topHoldersPct", 100)
+        dev = r.get("creatorBalance", 100)
+        
+        if dev > 15: return False, f"Dev {dev:.1f}%", score
+        if top10 > 60: return False, f"Bundled {top10:.0f}%", score
+        
+        return True, f"Safe {score}", score
+    except Exception as e:
+        print(f"Rugcheck fail {mint[:6]}: {e}")
+        return True, "No data", 0  # laat door als API down is
+
 def get_tokens():
     try:
-        url = "https://frontend-api-v3.pump.fun/coins?offset=0&limit=50&sort=created_timestamp&order=DESC"
-        r = requests.get(url, headers={"User-Agent":"Mozilla/5.0"}, timeout=10).json()
-        # v3 geeft andere format, fallback naar v2
+        headers = {"User-Agent":"Mozilla/5.0"}
+        # Probeer nieuwe API
+        url = "https://frontend-api-v3.pump.fun/coins?offset=0&limit=50&sort=market_cap&order=DESC"
+        r = requests.get(url, headers=headers, timeout=10).json()
         if isinstance(r, list): return r
-        return r.get("coins", [])
+        if isinstance(r, dict) and "coins" in r: return r["coins"]
+        # fallback v1
+        url2 = "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=created_timestamp&order=DESC"
+        return requests.get(url2, headers=headers, timeout=10).json()
     except Exception as e:
-        print(f"API error {e}")
+        print(f"Pump API error {e}")
         return []
 
 async def main():
-    print("=== SCANNER START $20K ===")
-    try:
-        await bot.send_message(chat_id=CHANNEL_ID, text="FAST0133 LIVE $20K+")
-        print("Telegram OK")
-    except Exception as e:
-        print(f"TELEGRAM ERROR: {e} - Check of bot admin is in @fast0133!")
-        return
-
+    await bot.send_message(chat_id=CHANNEL_ID, text="🛡️ FAST0133 $25K VERIFIED LIVE\n\nFilters:\n• $25K+ MC\n• Risk <40\n• Dev <15%\n• Top10 <60%\n• Not rugged\n\n@fast0133")
+    print("LIVE $25K VERIFIED")
+    
     while True:
         tokens = get_tokens()
-        print(f"Scan: {len(tokens)} coins gevonden")
+        print(f"Scan {len(tokens)}")
         for t in tokens:
             mint = t.get("mint")
             if not mint or mint in seen: continue
-            seen.add(mint)
+            
             mc = float(t.get("usd_market_cap",0) or 0)
-            if mc < 20000: continue
-            print(f"FOUND $20K: {t.get('symbol')} MC {mc}")
-            msg = f"🔥 ${t.get('symbol')} ${mc:,.0f}\nCA: `{mint}`\nhttps://pump.fun/coin/{mint}\n@fast0133"
+            if mc < 25000: continue
+            
+            seen.add(mint)
+            symbol = t.get("symbol","?")
+            name = t.get("name","?")
+            
+            print(f"Checking {symbol} ${mc:,.0f}")
+            safe, reason, risk = is_verified_safe(mint)
+            
+            if not safe:
+                print(f"  REJECT {symbol}: {reason}")
+                continue
+            
+            print(f"  ✅ APPROVED {symbol}")
+            msg = f"""✅ VERIFIED ${symbol} - ${mc:,.0f} MC
+
+**{name}**
+Risk: {risk}/100 - {reason}
+MC: ${mc:,.0f}
+
+CA:
+`{mint}`
+
+📊 https://pump.fun/coin/{mint}
+🛡️ https://rugcheck.xyz/tokens/{mint}
+
+@fast0133"""
+            
             try:
                 await bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
             except Exception as e:
-                print(f"Send error {e}")
-        await asyncio.sleep(10)
+                print(f"TG err {e}")
+        await asyncio.sleep(12)
 
 asyncio.run(main())

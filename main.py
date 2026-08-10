@@ -2,7 +2,7 @@ import os, time, requests, asyncio, threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Bot
 
-print("BOOT: $25K EARLY VERIFIED", flush=True)
+print("BOOT: $25K EARLY VERIFIED + VOLUME", flush=True)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 PORT = int(os.getenv("PORT", 10000))
@@ -15,23 +15,43 @@ class H(BaseHTTPRequestHandler):
 threading.Thread(target=lambda: HTTPServer(("0.0.0.0", PORT), H).serve_forever(), daemon=True).start()
 
 bot = Bot(token=BOT_TOKEN)
-seen = set()
+seen = {} # mint -> timestamp
+BLACKLIST = {"SAPIJIJU"} # die spapa komt nooit meer terug
 
 def get_25k_coins():
     try:
         r = requests.get("https://api.dexscreener.com/latest/dex/search/?q=pump.fun", timeout=15)
-        if r.status_code != 200: return []
+        if r.status_code!= 200: return []
         data = r.json()
         coins = []
-        for p in data.get("pairs", [])[:40]:
-            if p.get("chainId") != "solana": continue
+        for p in data.get("pairs", [])[:80]: # 80 ipv 40 = meer kans op volume
+            if p.get("chainId")!= "solana": continue
+
+            symbol = p.get("baseToken",{}).get("symbol","?").upper()
+            if symbol in BLACKLIST:
+                continue
+
             mc = float(p.get("fdv", 0) or p.get("marketCap", 0) or 0)
-            if mc < 25000 or mc > 90000: continue # 25k-90k = vroegste zone
+            if mc < 25000 or mc > 90000:
+                continue
+
+            # VOLUME FILTER - NIEUW
+            vol = p.get("volume", {})
+            vol24 = float(vol.get("h24", 0) or 0)
+            vol5m = float(vol.get("m5", 0) or 0)
+
+            if vol24 < 10000: # minimaal $10k volume 24h
+                continue
+            if vol5m < 500: # minimaal $500 volume laatste 5 min = live interesse
+                continue
+
             coins.append({
                 "mint": p.get("baseToken",{}).get("address"),
-                "symbol": p.get("baseToken",{}).get("symbol","?"),
+                "symbol": symbol,
                 "name": p.get("baseToken",{}).get("name","?"),
                 "mc": mc,
+                "vol24": vol24,
+                "vol5m": vol5m,
                 "url": p.get("url")
             })
         return coins
@@ -44,7 +64,6 @@ def is_verified(mint):
         r = requests.get(f"https://api.rugcheck.xyz/v1/tokens/{mint}/report", timeout=10).json()
         if r.get("rugged"): return False, 100
         score = r.get("score", 0)
-        # GEEN neppe munten: score < 40, top holders < 60%, geen mint authority
         risks = str(r.get("risks", []))
         if score > 50: return False, score
         if "Top 10 holders high" in risks: return False, score
@@ -53,28 +72,36 @@ def is_verified(mint):
         return True, 0
 
 async def loop():
-    print("LOOP LIVE $25K EARLY VERIFIED", flush=True)
-    await bot.send_message(CHANNEL_ID, "✅ Bot LIVE: $25K EARLY VERIFIED\nAlleen geverifieerde munten 25k-90k\nGeen neppe munten\n@fast0133")
+    print("LOOP LIVE $25K EARLY + VOLUME FILTER", flush=True)
+    await bot.send_message(CHANNEL_ID, "✅ Bot LIVE: $25K EARLY VERIFIED + VOLUME\nAlleen munten 25k-90k met >$10k vol & >$500 5m vol\nGeen SAPIJIJU spam meer\n@fast0133")
     while True:
+        # cleanup seen ouder dan 1 uur
+        now = time.time()
+        for k in list(seen.keys()):
+            if now - seen[k] > 3600:
+                del seen[k]
+
         coins = get_25k_coins()
-        print(f"SCAN {len(coins)} coins in 25k-90k zone", flush=True)
+        print(f"SCAN {len(coins)} coins in 25k-90k zone WITH VOLUME", flush=True)
         for c in coins:
             mint = c["mint"]
             if not mint or mint in seen: continue
             safe, score = is_verified(mint)
-            print(f"CHECK {c['symbol']} ${c['mc']:.0f} risk {score} safe={safe}", flush=True)
+            print(f"CHECK {c['symbol']} ${c['mc']:.0f} vol24 ${c['vol24']:.0f} vol5m ${c['vol5m']:.0f} risk {score} safe={safe}", flush=True)
             if not safe: continue
-            seen.add(mint)
+            seen[mint] = now
             msg = f"""🚀 EARLY VERIFIED ${c['symbol']}
 
 💰 MC: ${c['mc']:,.0f}
+📈 Vol 24h: ${c['vol24']:,.0f}
+🔥 Vol 5m: ${c['vol5m']:,.0f}
 ✅ Risk: {score}/100 - VERIFIED
 📊 {c['name']}
 
 `{mint}`
 
 https://pump.fun/coin/{mint}
-{ c['url'] }
+{c['url']}
 
 @fast0133"""
             await bot.send_message(CHANNEL_ID, msg, parse_mode="Markdown")

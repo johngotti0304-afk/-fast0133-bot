@@ -2,109 +2,62 @@ import os, time, requests, asyncio, threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Bot
 
-print("BOOT: $25K EARLY VERIFIED + VOLUME", flush=True)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 PORT = int(os.getenv("PORT", 10000))
 
-# Health server voor Render
 class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
-    def do_HEAD(self): self.send_response(200); self.end_headers()
+    def do_GET(self): 
+        self.send_response(200); self.end_headers()
+        self.wfile.write(b"OK")
     def log_message(self, *a): return
+
 threading.Thread(target=lambda: HTTPServer(("0.0.0.0", PORT), H).serve_forever(), daemon=True).start()
 
 bot = Bot(token=BOT_TOKEN)
-seen = {} # mint -> timestamp
-BLACKLIST = {"SAPIJIJU"} # die spapa komt nooit meer terug
+seen = set()
 
-def get_25k_coins():
+def get_best():
     try:
         r = requests.get("https://api.dexscreener.com/latest/dex/search/?q=pump.fun", timeout=15)
-        if r.status_code!= 200: return []
-        data = r.json()
-        coins = []
-        for p in data.get("pairs", [])[:80]: # 80 ipv 40 = meer kans op volume
-            if p.get("chainId")!= "solana": continue
-
-            symbol = p.get("baseToken",{}).get("symbol","?").upper()
-            if symbol in BLACKLIST:
-                continue
-
-            mc = float(p.get("fdv", 0) or p.get("marketCap", 0) or 0)
-            if mc < 25000 or mc > 90000:
-                continue
-
-            # VOLUME FILTER - NIEUW
-            vol = p.get("volume", {})
-            vol24 = float(vol.get("h24", 0) or 0)
-            vol5m = float(vol.get("m5", 0) or 0)
-
-            if vol24 < 10000: # minimaal $10k volume 24h
-                continue
-            if vol5m < 500: # minimaal $500 volume laatste 5 min = live interesse
-                continue
-
-            coins.append({
-                "mint": p.get("baseToken",{}).get("address"),
-                "symbol": symbol,
-                "name": p.get("baseToken",{}).get("name","?"),
-                "mc": mc,
-                "vol24": vol24,
-                "vol5m": vol5m,
-                "url": p.get("url")
-            })
-        return coins
+        out = []
+        for p in r.json().get("pairs", [])[:60]:
+            if p.get("chainId") != "solana": continue
+            mc = float(p.get("fdv",0) or 0)
+            vol5 = float(p.get("volume",{}).get("m5",0) or 0)
+            tx = p.get("txns",{}).get("m5",{}).get("buys",0) + p.get("txns",{}).get("m5",{}).get("sells",0)
+            if mc < 25000 or mc > 90000: continue
+            if vol5 < 1000: continue
+            if tx < 15: continue
+            out.append({"mint": p["baseToken"]["address"], "symbol": p["baseToken"]["symbol"], "mc": mc, "vol": vol5, "tx": tx, "url": p["url"]})
+        print(f"SCAN BEST: {len(out)} coins", flush=True)
+        return out
     except Exception as e:
-        print(f"Dex error {e}", flush=True)
-        return []
+        print(f"ERR {e}", flush=True); return []
 
-def is_verified(mint):
+def is_best(mint):
     try:
-        r = requests.get(f"https://api.rugcheck.xyz/v1/tokens/{mint}/report", timeout=10).json()
-        if r.get("rugged"): return False, 100
-        score = r.get("score", 0)
-        risks = str(r.get("risks", []))
-        if score > 50: return False, score
-        if "Top 10 holders high" in risks: return False, score
+        r = requests.get(f"https://api.rugcheck.xyz/v1/tokens/{mint}/report", timeout=10)
+        j = r.json()
+        if j.get("rugged"): return False, 100
+        score = j.get("score", 0)
+        if score > 30: return False, score
         return True, score
-    except:
-        return True, 0
+    except: return True, 0
 
 async def loop():
-    print("LOOP LIVE $25K EARLY + VOLUME FILTER", flush=True)
-    await bot.send_message(CHANNEL_ID, "✅ Bot LIVE: $25K EARLY VERIFIED + VOLUME\nAlleen munten 25k-90k met >$10k vol & >$500 5m vol\nGeen SAPIJIJU spam meer\n@fast0133")
+    await bot.send_message(CHANNEL_ID, "✅ BEST QUALITY BOT LIVE 25k-90k")
     while True:
-        # cleanup seen ouder dan 1 uur
-        now = time.time()
-        for k in list(seen.keys()):
-            if now - seen[k] > 3600:
-                del seen[k]
-
-        coins = get_25k_coins()
-        print(f"SCAN {len(coins)} coins in 25k-90k zone WITH VOLUME", flush=True)
-        for c in coins:
-            mint = c["mint"]
-            if not mint or mint in seen: continue
-            safe, score = is_verified(mint)
-            print(f"CHECK {c['symbol']} ${c['mc']:.0f} vol24 ${c['vol24']:.0f} vol5m ${c['vol5m']:.0f} risk {score} safe={safe}", flush=True)
+        for c in get_best():
+            m = c["mint"]
+            if not m or m in seen: continue
+            safe, score = is_best(m)
+            print(f"CHECK {c['symbol']} MC {c['mc']:.0f} VOL {c['vol']:.0f} SCORE {score} SAFE {safe}", flush=True)
             if not safe: continue
-            seen[mint] = now
-            msg = f"""🚀 EARLY VERIFIED ${c['symbol']}
-
-💰 MC: ${c['mc']:,.0f}
-📈 Vol 24h: ${c['vol24']:,.0f}
-🔥 Vol 5m: ${c['vol5m']:,.0f}
-✅ Risk: {score}/100 - VERIFIED
-📊 {c['name']}
-
-`{mint}`
-
-https://pump.fun/coin/{mint}
-{c['url']}
-
-@fast0133"""
-            await bot.send_message(CHANNEL_ID, msg, parse_mode="Markdown")
+            seen.add(m)
+            msg = f"🚀 BEST QUALITY ${c['symbol']}\n💰 MC: ${c['mc']:,.0f}\n📊 VOL: ${c['vol']:,.0f}\n✅ RISK {score}\n\n`{m}`\nhttps://pump.fun/coin/{m}\n{c['url']}"
+            try: await bot.send_message(CHANNEL_ID, msg, parse_mode="Markdown")
+            except: pass
             await asyncio.sleep(1)
         await asyncio.sleep(8)
 
